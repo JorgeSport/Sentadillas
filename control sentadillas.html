@@ -1,0 +1,197 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control Diario de Sentadillas</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .input-section {
+            margin-bottom: 20px;
+        }
+        input[type="number"] {
+            padding: 8px;
+            width: 100px;
+            margin-right: 10px;
+        }
+        button {
+            padding: 8px 16px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #218838;
+        }
+        #squatList {
+            margin-top: 20px;
+        }
+        .record {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        canvas {
+            margin-top: 20px;
+            max-width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Control Diario de Sentadillas</h1>
+        <div class="input-section">
+            <input type="number" id="squatInput" min="0" placeholder="Nº de sentadillas" required>
+            <button onclick="addSquat()">Agregar</button>
+        </div>
+        <div id="squatList"></div>
+        <canvas id="progressChart"></canvas>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // Cargar datos desde localStorage o inicializar array vacío
+        let squatData = JSON.parse(localStorage.getItem('squatData')) || [];
+
+        // Inicializar el gráfico
+        const ctx = document.getElementById('progressChart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Sentadillas por Día',
+                    data: [],
+                    borderColor: '#28a745',
+                    fill: false
+                }]
+            },
+            options: {
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: { display: true, text: 'Sentadillas' }
+                    },
+                    x: {
+                        title: { display: true, text: 'Fecha' }
+                    }
+                }
+            }
+        });
+
+        // Función para formatear la fecha
+        function formatDate(date) {
+            return date.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        }
+
+        // Función para agregar un registro de sentadillas
+        function addSquat() {
+            const squatInput = document.getElementById('squatInput');
+            const squats = parseInt(squatInput.value);
+            if (isNaN(squats) || squats < 0) {
+                alert('Por favor, ingresa un número válido de sentadillas.');
+                return;
+            }
+
+            const today = new Date();
+            const dateStr = formatDate(today);
+            const existingRecord = squatData.find(record => record.date === dateStr);
+
+            if (existingRecord) {
+                existingRecord.squats = squats; // Actualizar si ya existe un registro para hoy
+            } else {
+                squatData.push({ date: dateStr, squats: squats });
+            }
+
+            // Guardar en localStorage
+            localStorage.setItem('squatData', JSON.stringify(squatData));
+
+            // Actualizar la lista y el gráfico
+            updateSquatList();
+            updateChart();
+            squatInput.value = ''; // Limpiar el input
+        }
+
+        // Función para actualizar la lista de registros
+        function updateSquatList() {
+            const squatList = document.getElementById('squatList');
+            squatList.innerHTML = '';
+            squatData.sort((a, b) => new Date(a.date.split('/').reverse().join('-')) - new Date(b.date.split('/').reverse().join('-')));
+            squatData.forEach(record => {
+                const div = document.createElement('div');
+                div.className = 'record';
+                div.textContent = `${record.date}: ${record.squats} sentadillas`;
+                squatList.appendChild(div);
+            });
+        }
+
+        // Función para actualizar el gráfico
+        function updateChart() {
+            const sortedData = [...squatData].sort((a, b) => new Date(a.date.split('/').reverse().join('-')) - new Date(b.date.split('/').reverse().join('-')));
+            chart.data.labels = sortedData.map(record => record.date);
+            chart.data.datasets[0].data = sortedData.map(record => record.squats);
+            chart.update();
+        }
+
+        // Cargar datos iniciales
+        updateSquatList();
+        updateChart();
+    </script>
+</body>
+</html>
